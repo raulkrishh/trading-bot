@@ -40,12 +40,11 @@ def build_rsi_config(cfg_dict: dict, args: argparse.Namespace) -> RSIConfig:
     return RSIConfig(
         rsi_period       = int(get("rsi_period", 14)),
         rsi_buy          = float(get("rsi_buy", 35)),
-        rsi_sell         = float(get("rsi_sell", 70)),
+        rsi_sell         = float(get("rsi_sell", 60)),
         sl_pct           = float(get("sl_pct", 1.0)),
         shares_per_trade = int(get("shares_per_trade", 100)),
         trade_start_time = str(get("trade_start_time", "09:45")),
         trade_end_time   = str(get("trade_end_time", "15:00")),
-        eod_exit_time    = str(get("eod_exit_time", "15:30")),
     )
 
 

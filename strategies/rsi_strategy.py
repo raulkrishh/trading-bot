@@ -5,15 +5,16 @@ RSI Mean-Reversion Strategy
 Concept
 -------
 Pure RSI-driven mean-reversion: enter long when the asset is oversold
-(RSI < rsi_buy) and exit when momentum flips to overbought (RSI > rsi_sell).
+(RSI < rsi_buy) and exit only when momentum flips to overbought (RSI > rsi_sell)
+or the stop-loss is hit. Positions carry over overnight if RSI never recovers.
 
 Signal Logic
 ------------
 Entry  : RSI(14) crosses below `rsi_buy`  (default 35) → go long.
-Exit   : RSI(14) crosses above `rsi_sell` (default 70) → close long.
+Exit   : RSI(14) crosses above `rsi_sell` (default 60) → close long.
 Stop   : Price drops `sl_pct`% below entry price.
-EOD    : Any open position force-closed at `eod_exit_time`.
 
+No time-based EOD force-close — positions hold until the signal fires.
 No short selling — strategy is long-only.
 """
 
@@ -70,7 +71,7 @@ class RSIConfig:
     rsi_buy: float = 35.0
     """Enter long when RSI falls below this level (oversold)."""
 
-    rsi_sell: float = 70.0
+    rsi_sell: float = 60.0
     """Exit long when RSI rises above this level (overbought)."""
 
     sl_pct: float = 1.0
@@ -85,24 +86,34 @@ class RSIConfig:
     trade_end_time: str = "15:00"
     """Latest bar at which a new position may be opened."""
 
-    eod_exit_time: str = "15:30"
-    """Force-close any open position at or after this time."""
-
 
 class RSIStrategy:
     """
-    Long-only RSI mean-reversion strategy run bar-by-bar on a single day.
+    Long-only RSI mean-reversion strategy.
+
+    Positions carry over between days until RSI > rsi_sell or SL is hit.
 
     Usage
     -----
     strategy = RSIStrategy(config)
-    trades = strategy.run_day(day_bars)
+    # Pass carry-over trade from previous session (or None for first day)
+    completed, open_trade = strategy.run_day(day_bars, open_trade=None)
     """
 
     def __init__(self, config: RSIConfig | None = None) -> None:
         self.config = config or RSIConfig()
 
-    def run_day(self, day_bars: pd.DataFrame) -> list[RSITrade]:
+    def run_day(
+        self,
+        day_bars: pd.DataFrame,
+        open_trade: RSITrade | None = None,
+    ) -> tuple[list[RSITrade], RSITrade | None]:
+        """
+        Simulate one session bar-by-bar.
+
+        Returns (completed_trades, still_open_trade).
+        Pass still_open_trade into the next call to carry the position over.
+        """
         cfg = self.config
         bars = day_bars.copy()
 
@@ -111,24 +122,17 @@ class RSIStrategy:
 
         bars["rsi"] = calc_rsi(bars["Close"], period=cfg.rsi_period)
 
-        open_trade: RSITrade | None = None
         completed: list[RSITrade] = []
 
         trade_start = pd.Timestamp(f"1970-01-01 {cfg.trade_start_time}").time()
         trade_end   = pd.Timestamp(f"1970-01-01 {cfg.trade_end_time}").time()
-        eod_exit    = pd.Timestamp(f"1970-01-01 {cfg.eod_exit_time}").time()
 
         for ts, bar in bars.iterrows():
             bar_time = ts.time()
             close    = float(bar["Close"])
             bar_rsi  = float(bar["rsi"]) if not np.isnan(bar["rsi"]) else 50.0
 
-            # ── EOD force-close ────────────────────────────────────────
-            if open_trade is not None and bar_time >= eod_exit:
-                open_trade = self._close(open_trade, close, ts, "EOD", completed)
-                continue
-
-            # ── Manage open trade ──────────────────────────────────────
+            # ── Manage open trade (including carried-over positions) ────
             if open_trade is not None:
                 if float(bar["Low"]) <= open_trade.sl_price:
                     open_trade = self._close(open_trade, open_trade.sl_price, ts, "SL", completed)
@@ -136,7 +140,7 @@ class RSIStrategy:
                     open_trade = self._close(open_trade, close, ts, "RSI_SELL", completed)
                 continue
 
-            # ── Look for entry ─────────────────────────────────────────
+            # ── Look for new entry (only within trade window) ──────────
             if bar_time < trade_start or bar_time > trade_end:
                 continue
 
@@ -149,11 +153,8 @@ class RSIStrategy:
                     shares=cfg.shares_per_trade,
                 )
 
-        if open_trade is not None and not bars.empty:
-            last_close = float(bars.iloc[-1]["Close"])
-            open_trade = self._close(open_trade, last_close, bars.index[-1], "EOD", completed)
-
-        return completed
+        # Return open_trade so the backtester can carry it to the next day
+        return completed, open_trade
 
     def _close(
         self,

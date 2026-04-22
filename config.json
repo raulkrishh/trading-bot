@@ -12,7 +12,6 @@
     "sl_pct": 1.0,
     "shares_per_trade": 100,
     "trade_start_time": "09:45",
-    "trade_end_time": "15:00",
-    "eod_exit_time": "15:30"
+    "trade_end_time": "15:00"
   }
 }

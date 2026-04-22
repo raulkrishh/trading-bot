@@ -86,12 +86,13 @@ class Backtester:
         day_map = split_by_day(self._intraday_df)
         all_trades: list[Trade] = []
         skipped = 0
+        carry_trade = None  # RSI: open position carried over between days
 
         for date_str, day_bars in sorted(day_map.items()):
             day_ts = pd.Timestamp(date_str)
 
             if self.strategy_name == "rsi":
-                trades = self.strategy.run_day(day_bars)
+                trades, carry_trade = self.strategy.run_day(day_bars, open_trade=carry_trade)
             else:
                 try:
                     start_line = get_previous_day_open(self._daily_df, day_ts)

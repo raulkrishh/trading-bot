@@ -86,6 +86,9 @@ class RSIConfig:
     trade_end_time: str = "15:00"
     """Latest bar at which a new position may be opened."""
 
+    eod_exit_time: str = "14:30"
+    """Force-close any open position at or after this time."""
+
 
 class RSIStrategy:
     """
@@ -126,11 +129,17 @@ class RSIStrategy:
 
         trade_start = pd.Timestamp(f"1970-01-01 {cfg.trade_start_time}").time()
         trade_end   = pd.Timestamp(f"1970-01-01 {cfg.trade_end_time}").time()
+        eod_exit    = pd.Timestamp(f"1970-01-01 {cfg.eod_exit_time}").time()
 
         for ts, bar in bars.iterrows():
             bar_time = ts.time()
             close    = float(bar["Close"])
             bar_rsi  = float(bar["rsi"]) if not np.isnan(bar["rsi"]) else 50.0
+
+            # ── EOD force-close ────────────────────────────────────────
+            if open_trade is not None and bar_time >= eod_exit:
+                open_trade = self._close(open_trade, close, ts, "EOD", completed)
+                continue
 
             # ── Manage open trade (including carried-over positions) ────
             if open_trade is not None:

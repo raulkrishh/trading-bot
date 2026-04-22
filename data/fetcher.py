@@ -16,6 +16,8 @@ def fetch_daily(ticker: str, lookback_days: int = 60) -> pd.DataFrame:
                      end=end.strftime("%Y-%m-%d"), interval="1d",
                      auto_adjust=True, progress=False)
     df.index = pd.to_datetime(df.index)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
     return df
 
 
@@ -31,6 +33,8 @@ def fetch_intraday(ticker: str, interval: str = "5m", lookback_days: int = 59) -
                      end=end.strftime("%Y-%m-%d"), interval=interval,
                      auto_adjust=True, progress=False)
     df.index = pd.to_datetime(df.index)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
     if df.index.tz is None:
         df.index = df.index.tz_localize("America/New_York")
     else:

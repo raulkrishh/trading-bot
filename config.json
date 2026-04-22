@@ -8,7 +8,7 @@
   "strategy": {
     "rsi_period": 14,
     "rsi_buy": 35,
-    "rsi_sell": 70,
+    "rsi_sell": 60,
     "sl_pct": 1.0,
     "shares_per_trade": 100,
     "trade_start_time": "09:45",

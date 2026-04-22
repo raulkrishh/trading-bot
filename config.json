@@ -6,8 +6,8 @@
 
   "strategy": {
     "entry_pct": 0.75,
-    "rsi_oversold": 35,
-    "rsi_overbought": 65,
+    "rsi_oversold": 30,
+    "rsi_overbought": 70,
     "vol_multiplier": 1.2,
     "vol_avg_window": 20,
     "sl_pct": 0.50,

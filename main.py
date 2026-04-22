@@ -1,19 +1,21 @@
 """
-Entry point for the Bounce Back intraday trading strategy.
+Entry point for intraday trading strategy backtests.
 
 Usage
 -----
-Run a backtest with default config:
-    python main.py
+# Bounce Back strategy (default)
+python main.py
+python main.py --strategy bounce_back --ticker SPY --interval 5m
 
-Run with a custom config file:
-    python main.py --config my_config.json
+# Opening Range Breakout strategy
+python main.py --strategy orb
+python main.py --strategy orb --ticker AAPL --interval 5m
 
-Override individual parameters:
-    python main.py --ticker AAPL --interval 15m --entry-pct 1.0 --sl-pct 0.75
+# Override config file
+python main.py --strategy orb --config config_orb.json
 
-Save trade log to CSV:
-    python main.py --save-trades trades.csv
+# Save trade log
+python main.py --strategy orb --save-trades orb_trades.csv
 """
 
 import argparse
@@ -22,7 +24,8 @@ import sys
 from pathlib import Path
 
 from backtester import Backtester
-from strategies.bounce_back import BounceBackConfig
+from strategies.bounce_back import BounceBackConfig, BounceBackStrategy
+from strategies.orb import ORBConfig, ORBStrategy
 
 
 def load_config(path: str) -> dict:
@@ -30,13 +33,13 @@ def load_config(path: str) -> dict:
         return json.load(f)
 
 
-def build_config(cfg_dict: dict, args: argparse.Namespace) -> BounceBackConfig:
+def build_bounce_back(cfg_dict: dict, args: argparse.Namespace) -> tuple:
     s = cfg_dict.get("strategy", {})
 
     def get(key, default):
         return getattr(args, key.replace("-", "_"), None) or s.get(key, default)
 
-    return BounceBackConfig(
+    config = BounceBackConfig(
         entry_pct          = float(get("entry_pct", 0.75)),
         rsi_oversold       = float(get("rsi_oversold", 35)),
         rsi_overbought     = float(get("rsi_overbought", 65)),
@@ -50,26 +53,52 @@ def build_config(cfg_dict: dict, args: argparse.Namespace) -> BounceBackConfig:
         shares_per_trade   = int(get("shares_per_trade", 100)),
         max_trades_per_day = int(get("max_trades_per_day", 2)),
     )
+    return BounceBackStrategy(config), "Bounce Back Strategy"
+
+
+def build_orb(cfg_dict: dict, args: argparse.Namespace) -> tuple:
+    s = cfg_dict.get("strategy", {})
+
+    def get(key, default):
+        return getattr(args, key.replace("-", "_"), None) or s.get(key, default)
+
+    config = ORBConfig(
+        or_candles       = int(get("or_candles", 3)),
+        rsi_long_min     = float(get("rsi_long_min", 55)),
+        rsi_short_max    = float(get("rsi_short_max", 45)),
+        ema_period       = int(get("ema_period", 20)),
+        vol_multiplier   = float(get("vol_multiplier", 2.0)),
+        vol_avg_window   = int(get("vol_avg_window", 20)),
+        trade_end_time   = str(get("trade_end_time", "11:00")),
+        eod_exit_time    = str(get("eod_exit_time", "15:30")),
+        shares_per_trade = int(get("shares_per_trade", 100)),
+    )
+    return ORBStrategy(config), "Opening Range Breakout (ORB)"
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="Bounce Back from Previous Day Open — Intraday Strategy"
-    )
-    p.add_argument("--config",       default="config.json", help="Path to JSON config file")
+    p = argparse.ArgumentParser(description="Intraday Strategy Backtester")
+    p.add_argument("--strategy",     default="bounce_back",
+                   choices=["bounce_back", "orb"],
+                   help="Strategy to run (default: bounce_back)")
+    p.add_argument("--config",       help="Path to JSON config file (auto-detected if omitted)")
     p.add_argument("--ticker",       help="Override ticker symbol")
     p.add_argument("--interval",     help="Override bar interval (1m/5m/15m)")
     p.add_argument("--lookback",     type=int, help="Override lookback days (≤59)")
-    p.add_argument("--entry-pct",    type=float, help="Override entry_pct")
     p.add_argument("--sl-pct",       type=float, help="Override sl_pct")
+    p.add_argument("--entry-pct",    type=float, help="[bounce_back] Override entry_pct")
     p.add_argument("--save-trades",  help="Save trade log to this CSV path")
     return p.parse_args()
+
+
+def default_config_for(strategy: str) -> str:
+    return "config_orb.json" if strategy == "orb" else "config.json"
 
 
 def main() -> None:
     args = parse_args()
 
-    config_path = Path(args.config)
+    config_path = Path(args.config or default_config_for(args.strategy))
     if not config_path.exists():
         print(f"[ERROR] Config file not found: {config_path}")
         sys.exit(1)
@@ -81,13 +110,17 @@ def main() -> None:
     lookback_days = args.lookback or cfg_dict.get("lookback_days", 59)
     initial_cap   = cfg_dict.get("initial_capital", 100_000)
 
-    strategy_cfg = build_config(cfg_dict, args)
+    if args.strategy == "orb":
+        strategy, name = build_orb(cfg_dict, args)
+    else:
+        strategy, name = build_bounce_back(cfg_dict, args)
 
     bt = Backtester(
         ticker          = ticker,
         interval        = interval,
         lookback_days   = lookback_days,
-        config          = strategy_cfg,
+        strategy        = strategy,
+        strategy_name   = name,
         initial_capital = initial_cap,
     )
 
@@ -98,7 +131,6 @@ def main() -> None:
     if args.save_trades and not results.empty:
         bt.save_trades(args.save_trades)
 
-    # Equity curve preview
     eq = bt.equity_curve()
     if not eq.empty:
         print(f"  Start equity : ${eq.iloc[0]:,.2f}")

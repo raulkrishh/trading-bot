@@ -20,6 +20,10 @@ def average_volume(volume: pd.Series, window: int = 20) -> pd.Series:
     return volume.rolling(window=window, min_periods=1).mean()
 
 
+def ema(series: pd.Series, span: int) -> pd.Series:
+    return series.ewm(span=span, adjust=False).mean()
+
+
 def vwap(df: pd.DataFrame) -> pd.Series:
     """Session VWAP — resets each day if df spans multiple days."""
     tp = (df["High"] + df["Low"] + df["Close"]) / 3

@@ -47,6 +47,9 @@ def build_config(cfg_dict: dict, args: argparse.Namespace) -> BounceBackConfig:
         trade_start_time   = str(get("trade_start_time", "09:45")),
         trade_end_time     = str(get("trade_end_time", "15:00")),
         eod_exit_time      = str(get("eod_exit_time", "15:30")),
+        vix_min            = float(get("vix_min", 0.0)),
+        ema_fast           = int(get("ema_fast", 8)),
+        ema_slow           = int(get("ema_slow", 20)),
         shares_per_trade   = int(get("shares_per_trade", 100)),
         max_trades_per_day = int(get("max_trades_per_day", 2)),
     )

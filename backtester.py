@@ -10,8 +10,9 @@ from typing import Type
 import pandas as pd
 import numpy as np
 
-from data.fetcher import fetch_daily, fetch_intraday, get_previous_day_open, split_by_day
+from data.fetcher import fetch_daily, fetch_intraday, get_previous_day_open, get_previous_day_close, split_by_day
 from strategies.bounce_back import BounceBackStrategy, BounceBackConfig, Trade
+from utils.indicators import rsi as calc_rsi, average_volume, ema as calc_ema
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -48,6 +49,7 @@ class Backtester:
 
         self._daily_df    : pd.DataFrame | None = None
         self._intraday_df : pd.DataFrame | None = None
+        self._vix_df      : pd.DataFrame | None = None
         self._trades      : list[Trade]          = []
         self._results_df  : pd.DataFrame | None = None
 
@@ -66,6 +68,10 @@ class Backtester:
         print(f"[Backtester] Loaded {len(self._intraday_df)} intraday bars across "
               f"{self._intraday_df.index.normalize().nunique()} trading days.")
 
+        if self.config.vix_min > 0:
+            print("[Backtester] Fetching VIX data…")
+            self._vix_df = fetch_daily("^VIX", lookback_days=self.lookback_days + 10)
+
     # ------------------------------------------------------------------
     # Run
     # ------------------------------------------------------------------
@@ -74,20 +80,84 @@ class Backtester:
         if self._daily_df is None or self._intraday_df is None:
             self.load_data()
 
-        day_map = split_by_day(self._intraday_df)
-        all_trades: list[Trade] = []
-        skipped = 0
+        bars = self._intraday_df.copy()
+        if isinstance(bars.columns, pd.MultiIndex):
+            bars.columns = bars.columns.get_level_values(0)
 
-        for date_str, day_bars in sorted(day_map.items()):
-            day_ts = pd.Timestamp(date_str)
+        cfg = self.config
+        bars["rsi"]      = calc_rsi(bars["Close"], period=14)
+        bars["avg_vol"]  = average_volume(bars["Volume"], window=cfg.vol_avg_window)
+        bars["ema_fast"] = calc_ema(bars["Close"], span=cfg.ema_fast)
+        bars["ema_slow"] = calc_ema(bars["Close"], span=cfg.ema_slow)
+
+        trade_start = pd.Timestamp(f"1970-01-01 {cfg.trade_start_time}").time()
+        trade_end   = pd.Timestamp(f"1970-01-01 {cfg.trade_end_time}").time()
+
+        all_trades: list[Trade] = []
+        open_trade: Trade | None = None
+        prev_ef: float | None = None
+        prev_es: float | None = None
+
+        for ts, bar in bars.iterrows():
             try:
-                start_line = get_previous_day_open(self._daily_df, day_ts)
+                start_line = get_previous_day_open(self._daily_df, ts)
             except ValueError:
-                skipped += 1
                 continue
 
-            trades = self.strategy.run_day(day_bars, start_line)
-            all_trades.extend(trades)
+            close  = float(bar["Close"])
+            high   = float(bar["High"])
+            low    = float(bar["Low"])
+            volume = float(bar["Volume"])
+            avg_vol = float(bar["avg_vol"]) if not np.isnan(bar["avg_vol"]) else 0.0
+            bar_rsi = float(bar["rsi"])     if not np.isnan(bar["rsi"])     else 50.0
+            ef = float(bar["ema_fast"]) if not np.isnan(bar["ema_fast"]) else None
+            es = float(bar["ema_slow"]) if not np.isnan(bar["ema_slow"]) else None
+
+            if open_trade is not None:
+                # SL check
+                hit_sl = (
+                    (open_trade.side == "long"  and low  <= open_trade.sl_price) or
+                    (open_trade.side == "short" and high >= open_trade.sl_price)
+                )
+                if hit_sl:
+                    open_trade = self.strategy._close_trade(
+                        open_trade, open_trade.sl_price, ts, "SL", all_trades
+                    )
+                # EMA crossover exit
+                elif ef is not None and es is not None and prev_ef is not None and prev_es is not None:
+                    bearish_cross = prev_ef >= prev_es and ef < es
+                    bullish_cross = prev_ef <= prev_es and ef > es
+                    if open_trade.side == "long" and bearish_cross:
+                        open_trade = self.strategy._close_trade(
+                            open_trade, close, ts, "EMA_CROSS", all_trades
+                        )
+                    elif open_trade.side == "short" and bullish_cross:
+                        open_trade = self.strategy._close_trade(
+                            open_trade, close, ts, "EMA_CROSS", all_trades
+                        )
+
+            # Entry — only if no open position and within allowed hours
+            if open_trade is None and trade_start <= ts.time() <= trade_end:
+                # VIX filter: skip entry if prior-day VIX is below threshold
+                vix_ok = True
+                if self._vix_df is not None and cfg.vix_min > 0:
+                    try:
+                        vix_ok = get_previous_day_close(self._vix_df, ts) >= cfg.vix_min
+                    except ValueError:
+                        vix_ok = False
+                if vix_ok:
+                    signal = self.strategy._entry_signal(close, bar_rsi, volume, avg_vol, start_line)
+                    if signal is not None:
+                        open_trade = self.strategy._open_trade(signal, close, ts, start_line)
+
+            prev_ef = ef
+            prev_es = es
+
+        # Close any trade still open at end of data
+        if open_trade is not None:
+            self.strategy._close_trade(
+                open_trade, float(bars["Close"].iloc[-1]), bars.index[-1], "END", all_trades
+            )
 
         self._trades = all_trades
         self._results_df = self._build_results(all_trades)

@@ -131,6 +131,17 @@ class BounceBackConfig:
     eod_exit_time: str = "15:30"
     """Any open position is force-closed at or after this time."""
 
+    # --- VIX filter ---
+    vix_min: float = 0.0
+    """Only open new positions when prior day VIX close exceeds this level. 0 = disabled."""
+
+    # --- EMA crossover exit ---
+    ema_fast: int = 8
+    """Fast EMA period for crossover exit signal."""
+
+    ema_slow: int = 20
+    """Slow EMA period for crossover exit signal."""
+
     # --- Position sizing ---
     shares_per_trade: int = 100
     """Fixed share size for every trade."""

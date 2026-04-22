@@ -12,9 +12,9 @@
     "vol_avg_window": 20,
     "sl_pct": 0.50,
     "tp_buffer_pct": 0.10,
-    "trade_start_time": "09:45",
-    "trade_end_time": "15:00",
-    "eod_exit_time": "15:30",
+    "trade_start_time": "04:00",
+    "trade_end_time": "19:30",
+    "eod_exit_time": "20:00",
     "shares_per_trade": 100,
     "max_trades_per_day": 2
   }

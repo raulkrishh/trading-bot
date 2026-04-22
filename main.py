@@ -1,19 +1,18 @@
 """
-Entry point for the Bounce Back intraday trading strategy.
+Intraday Trading Strategy Backtester
 
 Usage
 -----
-Run a backtest with default config:
+Bounce Back (default):
     python main.py
+    python main.py --ticker AAPL --interval 5m --entry-pct 1.0 --sl-pct 0.75
 
-Run with a custom config file:
-    python main.py --config my_config.json
-
-Override individual parameters:
-    python main.py --ticker AAPL --interval 15m --entry-pct 1.0 --sl-pct 0.75
+EMA Crossover (1-minute):
+    python main.py --strategy ema-crossover
+    python main.py --strategy ema-crossover --ticker QQQ --interval 1m
 
 Save trade log to CSV:
-    python main.py --save-trades trades.csv
+    python main.py --strategy ema-crossover --save-trades trades.csv
 """
 
 import argparse
@@ -22,7 +21,8 @@ import sys
 from pathlib import Path
 
 from backtester import Backtester
-from strategies.bounce_back import BounceBackConfig
+from strategies.bounce_back import BounceBackConfig, BounceBackStrategy
+from strategies.ema_crossover import EmaCrossoverConfig, EmaCrossoverStrategy
 
 
 def load_config(path: str) -> dict:
@@ -30,7 +30,7 @@ def load_config(path: str) -> dict:
         return json.load(f)
 
 
-def build_config(cfg_dict: dict, args: argparse.Namespace) -> BounceBackConfig:
+def build_bounce_back_config(cfg_dict: dict, args: argparse.Namespace) -> BounceBackConfig:
     s = cfg_dict.get("strategy", {})
 
     def get(key, default):
@@ -52,17 +52,31 @@ def build_config(cfg_dict: dict, args: argparse.Namespace) -> BounceBackConfig:
     )
 
 
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="Bounce Back from Previous Day Open — Intraday Strategy"
+def build_ema_config(cfg_dict: dict, args: argparse.Namespace) -> EmaCrossoverConfig:
+    s = cfg_dict.get("ema_crossover", {})
+    return EmaCrossoverConfig(
+        ema_fast         = int(s.get("ema_fast", 8)),
+        ema_slow         = int(s.get("ema_slow", 20)),
+        sl_pct           = float(args.sl_pct or s.get("sl_pct", 1.0)),
+        shares_per_trade = int(s.get("shares_per_trade", 100)),
+        trade_start_time = str(s.get("trade_start_time", "09:45")),
+        trade_end_time   = str(s.get("trade_end_time", "15:00")),
+        eod_exit_time    = str(s.get("eod_exit_time", "15:30")),
+        allow_short      = bool(s.get("allow_short", True)),
     )
-    p.add_argument("--config",       default="config.json", help="Path to JSON config file")
-    p.add_argument("--ticker",       help="Override ticker symbol")
-    p.add_argument("--interval",     help="Override bar interval (1m/5m/15m)")
-    p.add_argument("--lookback",     type=int, help="Override lookback days (≤59)")
-    p.add_argument("--entry-pct",    type=float, help="Override entry_pct")
-    p.add_argument("--sl-pct",       type=float, help="Override sl_pct")
-    p.add_argument("--save-trades",  help="Save trade log to this CSV path")
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Intraday Strategy Backtester")
+    p.add_argument("--config",    default="config.json", help="Path to JSON config file")
+    p.add_argument("--strategy",  choices=["bounce-back", "ema-crossover"],
+                   default="bounce-back", help="Strategy to backtest")
+    p.add_argument("--ticker",    help="Override ticker symbol")
+    p.add_argument("--interval",  help="Override bar interval (1m/5m/15m)")
+    p.add_argument("--lookback",  type=int, help="Override lookback days (≤7 for 1m, ≤59 for 5m+)")
+    p.add_argument("--sl-pct",    type=float, help="Override stop-loss %")
+    p.add_argument("--entry-pct", type=float, help="Override entry_pct (bounce-back only)")
+    p.add_argument("--save-trades", help="Save trade log to this CSV path")
     return p.parse_args()
 
 
@@ -74,20 +88,38 @@ def main() -> None:
         print(f"[ERROR] Config file not found: {config_path}")
         sys.exit(1)
 
-    cfg_dict = load_config(str(config_path))
-
-    ticker        = args.ticker   or cfg_dict.get("ticker", "SPY")
-    interval      = args.interval or cfg_dict.get("interval", "5m")
-    lookback_days = args.lookback or cfg_dict.get("lookback_days", 59)
+    cfg_dict      = load_config(str(config_path))
     initial_cap   = cfg_dict.get("initial_capital", 100_000)
 
-    strategy_cfg = build_config(cfg_dict, args)
+    if args.strategy == "ema-crossover":
+        ema_cfg  = build_ema_config(cfg_dict, args)
+        strategy = EmaCrossoverStrategy(ema_cfg)
+
+        ticker        = args.ticker   or cfg_dict.get("ticker", "SPY")
+        interval      = args.interval or cfg_dict.get("ema_crossover", {}).get("interval", "1m")
+        lookback_days = args.lookback or cfg_dict.get("ema_crossover", {}).get("lookback_days", 7)
+
+        if interval == "1m" and lookback_days > 7:
+            print(f"[WARNING] yfinance limits 1m data to 7 days. Capping lookback at 7.")
+            lookback_days = 7
+
+        strategy_name = f"EMA{ema_cfg.ema_fast}/EMA{ema_cfg.ema_slow} Crossover"
+    else:
+        bounce_cfg = build_bounce_back_config(cfg_dict, args)
+        strategy   = BounceBackStrategy(bounce_cfg)
+
+        ticker        = args.ticker   or cfg_dict.get("ticker", "SPY")
+        interval      = args.interval or cfg_dict.get("interval", "5m")
+        lookback_days = args.lookback or cfg_dict.get("lookback_days", 59)
+
+        strategy_name = "Bounce Back"
 
     bt = Backtester(
         ticker          = ticker,
         interval        = interval,
         lookback_days   = lookback_days,
-        config          = strategy_cfg,
+        strategy        = strategy,
+        strategy_name   = strategy_name,
         initial_capital = initial_cap,
     )
 
@@ -98,7 +130,6 @@ def main() -> None:
     if args.save_trades and not results.empty:
         bt.save_trades(args.save_trades)
 
-    # Equity curve preview
     eq = bt.equity_curve()
     if not eq.empty:
         print(f"  Start equity : ${eq.iloc[0]:,.2f}")

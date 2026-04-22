@@ -23,6 +23,7 @@ from pathlib import Path
 
 from backtester import Backtester
 from strategies.bounce_back import BounceBackConfig
+from strategies.rsi_strategy import RSIConfig
 
 
 def load_config(path: str) -> dict:
@@ -30,7 +31,25 @@ def load_config(path: str) -> dict:
         return json.load(f)
 
 
-def build_config(cfg_dict: dict, args: argparse.Namespace) -> BounceBackConfig:
+def build_rsi_config(cfg_dict: dict, args: argparse.Namespace) -> RSIConfig:
+    s = cfg_dict.get("strategy", {})
+
+    def get(key, default):
+        return getattr(args, key.replace("-", "_"), None) or s.get(key, default)
+
+    return RSIConfig(
+        rsi_period       = int(get("rsi_period", 14)),
+        rsi_buy          = float(get("rsi_buy", 35)),
+        rsi_sell         = float(get("rsi_sell", 70)),
+        sl_pct           = float(get("sl_pct", 1.0)),
+        shares_per_trade = int(get("shares_per_trade", 100)),
+        trade_start_time = str(get("trade_start_time", "09:45")),
+        trade_end_time   = str(get("trade_end_time", "15:00")),
+        eod_exit_time    = str(get("eod_exit_time", "15:30")),
+    )
+
+
+def build_bounce_config(cfg_dict: dict, args: argparse.Namespace) -> BounceBackConfig:
     s = cfg_dict.get("strategy", {})
 
     def get(key, default):
@@ -54,14 +73,17 @@ def build_config(cfg_dict: dict, args: argparse.Namespace) -> BounceBackConfig:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Bounce Back from Previous Day Open — Intraday Strategy"
+        description="RSI Mean-Reversion / Bounce Back — Intraday Strategy"
     )
     p.add_argument("--config",       default="config.json", help="Path to JSON config file")
+    p.add_argument("--strategy",     default="rsi", choices=["rsi", "bounce_back"],
+                   help="Strategy to run (default: rsi)")
     p.add_argument("--ticker",       help="Override ticker symbol")
     p.add_argument("--interval",     help="Override bar interval (1m/5m/15m)")
     p.add_argument("--lookback",     type=int, help="Override lookback days (≤59)")
-    p.add_argument("--entry-pct",    type=float, help="Override entry_pct")
-    p.add_argument("--sl-pct",       type=float, help="Override sl_pct")
+    p.add_argument("--rsi-buy",      type=float, help="RSI buy threshold (default 35)")
+    p.add_argument("--rsi-sell",     type=float, help="RSI sell threshold (default 70)")
+    p.add_argument("--sl-pct",       type=float, help="Stop-loss % from entry")
     p.add_argument("--save-trades",  help="Save trade log to this CSV path")
     return p.parse_args()
 
@@ -80,8 +102,12 @@ def main() -> None:
     interval      = args.interval or cfg_dict.get("interval", "5m")
     lookback_days = args.lookback or cfg_dict.get("lookback_days", 59)
     initial_cap   = cfg_dict.get("initial_capital", 100_000)
+    strategy_name = args.strategy or cfg_dict.get("strategy_name", "rsi")
 
-    strategy_cfg = build_config(cfg_dict, args)
+    if strategy_name == "rsi":
+        strategy_cfg = build_rsi_config(cfg_dict, args)
+    else:
+        strategy_cfg = build_bounce_config(cfg_dict, args)
 
     bt = Backtester(
         ticker          = ticker,
@@ -89,6 +115,7 @@ def main() -> None:
         lookback_days   = lookback_days,
         config          = strategy_cfg,
         initial_capital = initial_cap,
+        strategy_name   = strategy_name,
     )
 
     bt.load_data()

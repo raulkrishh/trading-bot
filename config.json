@@ -3,19 +3,16 @@
   "interval": "5m",
   "lookback_days": 59,
   "initial_capital": 100000,
+  "strategy_name": "rsi",
 
   "strategy": {
-    "entry_pct": 0.75,
-    "rsi_oversold": 35,
-    "rsi_overbought": 65,
-    "vol_multiplier": 1.2,
-    "vol_avg_window": 20,
-    "sl_pct": 0.50,
-    "tp_buffer_pct": 0.10,
+    "rsi_period": 14,
+    "rsi_buy": 35,
+    "rsi_sell": 70,
+    "sl_pct": 1.0,
+    "shares_per_trade": 100,
     "trade_start_time": "09:45",
     "trade_end_time": "15:00",
-    "eod_exit_time": "15:30",
-    "shares_per_trade": 100,
-    "max_trades_per_day": 2
+    "eod_exit_time": "15:30"
   }
 }

@@ -56,6 +56,16 @@ def get_previous_day_open(daily_df: pd.DataFrame, date: pd.Timestamp) -> float:
     return prev_open
 
 
+def get_previous_day_close(daily_df: pd.DataFrame, date: pd.Timestamp) -> float:
+    """Return the closing price of the trading day immediately before `date`."""
+    date_only = pd.Timestamp(date).normalize().tz_localize(None)
+    idx = daily_df.index.tz_localize(None) if daily_df.index.tz else daily_df.index
+    past = daily_df[idx.normalize() < date_only]
+    if past.empty:
+        raise ValueError(f"No trading day found before {date_only.date()}")
+    return float(past.iloc[-1]["Close"])
+
+
 def split_by_day(intraday_df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     """Split an intraday DataFrame into {date_str: day_df} mapping."""
     groups = {}

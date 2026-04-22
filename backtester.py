@@ -10,7 +10,7 @@ from typing import Type
 import pandas as pd
 import numpy as np
 
-from data.fetcher import fetch_daily, fetch_intraday, get_previous_day_open, split_by_day
+from data.fetcher import fetch_daily, fetch_intraday, get_previous_day_open, get_previous_day_close, split_by_day
 from strategies.bounce_back import BounceBackStrategy, BounceBackConfig, Trade
 from utils.indicators import rsi as calc_rsi, average_volume, ema as calc_ema
 
@@ -49,6 +49,7 @@ class Backtester:
 
         self._daily_df    : pd.DataFrame | None = None
         self._intraday_df : pd.DataFrame | None = None
+        self._vix_df      : pd.DataFrame | None = None
         self._trades      : list[Trade]          = []
         self._results_df  : pd.DataFrame | None = None
 
@@ -66,6 +67,10 @@ class Backtester:
         )
         print(f"[Backtester] Loaded {len(self._intraday_df)} intraday bars across "
               f"{self._intraday_df.index.normalize().nunique()} trading days.")
+
+        if self.config.vix_min > 0:
+            print("[Backtester] Fetching VIX data…")
+            self._vix_df = fetch_daily("^VIX", lookback_days=self.lookback_days + 10)
 
     # ------------------------------------------------------------------
     # Run
@@ -133,9 +138,17 @@ class Backtester:
 
             # Entry — only if no open position and within allowed hours
             if open_trade is None and trade_start <= ts.time() <= trade_end:
-                signal = self.strategy._entry_signal(close, bar_rsi, volume, avg_vol, start_line)
-                if signal is not None:
-                    open_trade = self.strategy._open_trade(signal, close, ts, start_line)
+                # VIX filter: skip entry if prior-day VIX is below threshold
+                vix_ok = True
+                if self._vix_df is not None and cfg.vix_min > 0:
+                    try:
+                        vix_ok = get_previous_day_close(self._vix_df, ts) >= cfg.vix_min
+                    except ValueError:
+                        vix_ok = False
+                if vix_ok:
+                    signal = self.strategy._entry_signal(close, bar_rsi, volume, avg_vol, start_line)
+                    if signal is not None:
+                        open_trade = self.strategy._open_trade(signal, close, ts, start_line)
 
             prev_ef = ef
             prev_es = es

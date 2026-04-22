@@ -1,33 +1,28 @@
 """
 Backtesting engine for intraday strategies.
 Iterates over historical days, feeds each day to a strategy, and aggregates results.
+Accepts any strategy object that implements run_day(day_bars, start_line=<float>).
 """
 
 from __future__ import annotations
 
-import json
-from typing import Type
 import pandas as pd
 import numpy as np
 
 from data.fetcher import fetch_daily, fetch_intraday, get_previous_day_open, split_by_day
-from strategies.bounce_back import BounceBackStrategy, BounceBackConfig, Trade
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Core backtester
-# ──────────────────────────────────────────────────────────────────────────────
 
 class Backtester:
     """
-    Walk-forward backtester that runs a BounceBackStrategy day-by-day.
+    Walk-forward backtester for intraday strategies.
 
     Parameters
     ----------
     ticker          : Stock symbol (e.g. 'SPY', 'AAPL').
     interval        : Intraday bar interval ('1m', '5m', '15m').
     lookback_days   : Calendar days of intraday history to fetch (≤ 59 for yfinance).
-    config          : BounceBackConfig instance; uses defaults if None.
+    strategy        : Strategy instance with a run_day(day_bars, start_line=float) method.
+    strategy_name   : Display name shown in the summary header.
     initial_capital : Starting cash for equity curve calculation.
     """
 
@@ -36,19 +31,19 @@ class Backtester:
         ticker: str,
         interval: str = "5m",
         lookback_days: int = 59,
-        config: BounceBackConfig | None = None,
+        strategy=None,
+        strategy_name: str = "Strategy",
         initial_capital: float = 100_000.0,
     ) -> None:
         self.ticker          = ticker.upper()
         self.interval        = interval
         self.lookback_days   = lookback_days
-        self.config          = config or BounceBackConfig()
+        self.strategy        = strategy
+        self.strategy_name   = strategy_name
         self.initial_capital = initial_capital
-        self.strategy        = BounceBackStrategy(self.config)
 
         self._daily_df    : pd.DataFrame | None = None
         self._intraday_df : pd.DataFrame | None = None
-        self._trades      : list[Trade]          = []
         self._results_df  : pd.DataFrame | None = None
 
     # ------------------------------------------------------------------
@@ -75,21 +70,20 @@ class Backtester:
             self.load_data()
 
         day_map = split_by_day(self._intraday_df)
-        all_trades: list[Trade] = []
-        skipped = 0
+        all_trades = []
 
         for date_str, day_bars in sorted(day_map.items()):
             day_ts = pd.Timestamp(date_str)
             try:
                 start_line = get_previous_day_open(self._daily_df, day_ts)
             except ValueError:
-                skipped += 1
                 continue
 
-            trades = self.strategy.run_day(day_bars, start_line)
+            # start_line is passed as kwarg; strategies that don't need it
+            # declare it with a default of None and ignore it.
+            trades = self.strategy.run_day(day_bars, start_line=start_line)
             all_trades.extend(trades)
 
-        self._trades = all_trades
         self._results_df = self._build_results(all_trades)
         return self._results_df
 
@@ -97,7 +91,7 @@ class Backtester:
     # Results
     # ------------------------------------------------------------------
 
-    def _build_results(self, trades: list[Trade]) -> pd.DataFrame:
+    def _build_results(self, trades: list) -> pd.DataFrame:
         if not trades:
             return pd.DataFrame()
         rows = [t.to_dict() for t in trades]
@@ -116,20 +110,20 @@ class Backtester:
         wins          = df[df["pnl"] > 0]
         losses        = df[df["pnl"] <= 0]
         win_rate      = len(wins) / total_trades * 100 if total_trades else 0
-        avg_win       = wins["pnl"].mean()  if len(wins) else 0
+        avg_win       = wins["pnl"].mean()   if len(wins)   else 0
         avg_loss      = losses["pnl"].mean() if len(losses) else 0
         profit_factor = (
             wins["pnl"].sum() / abs(losses["pnl"].sum())
             if losses["pnl"].sum() != 0 else float("inf")
         )
-        net_pnl       = df["pnl"].sum()
-        max_dd        = self._max_drawdown(df["pnl"])
-
+        net_pnl  = df["pnl"].sum()
+        max_dd   = self._max_drawdown(df["pnl"])
         by_reason = df.groupby("exit_reason")["pnl"].agg(["count", "sum", "mean"])
 
         return {
             "ticker"          : self.ticker,
             "interval"        : self.interval,
+            "strategy"        : self.strategy_name,
             "total_trades"    : total_trades,
             "win_rate_pct"    : round(win_rate, 2),
             "avg_win_usd"     : round(avg_win, 2),
@@ -144,11 +138,9 @@ class Backtester:
     def _max_drawdown(pnl_series: pd.Series) -> float:
         equity = pnl_series.cumsum()
         peak   = equity.cummax()
-        dd     = equity - peak
-        return float(dd.min())
+        return float((equity - peak).min())
 
     def equity_curve(self) -> pd.Series:
-        """Return a daily equity curve (cumulative PnL added to initial capital)."""
         if self._results_df is None or self._results_df.empty:
             return pd.Series(dtype=float)
         daily = self._results_df.groupby("date")["pnl"].sum()
@@ -161,7 +153,7 @@ class Backtester:
             return
 
         print("\n" + "=" * 55)
-        print(f"  Bounce Back Strategy — Backtest Results [{s['ticker']}]")
+        print(f"  {s['strategy']} — Backtest Results [{s['ticker']}]")
         print("=" * 55)
         print(f"  Interval          : {s['interval']}")
         print(f"  Total Trades      : {s['total_trades']}")

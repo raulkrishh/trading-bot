@@ -1,0 +1,18 @@
+{
+  "ticker": "SPY",
+  "interval": "5m",
+  "lookback_days": 59,
+  "initial_capital": 100000,
+
+  "strategy": {
+    "or_candles": 3,
+    "rsi_long_min": 55,
+    "rsi_short_max": 45,
+    "ema_period": 20,
+    "vol_multiplier": 2.0,
+    "vol_avg_window": 20,
+    "trade_end_time": "11:00",
+    "eod_exit_time": "15:30",
+    "shares_per_trade": 100
+  }
+}

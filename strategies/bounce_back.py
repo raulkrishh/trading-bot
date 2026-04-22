@@ -159,7 +159,7 @@ class BounceBackStrategy:
     def run_day(
         self,
         day_bars: pd.DataFrame,
-        start_line: float,
+        start_line: float = 0.0,
     ) -> list[Trade]:
         """
         Simulate one trading day bar-by-bar.

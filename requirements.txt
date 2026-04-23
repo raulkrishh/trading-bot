@@ -4,3 +4,5 @@ numpy>=1.26.0
 ta>=0.11.0
 matplotlib>=3.8.0
 rich>=13.7.0
+alpaca-py>=0.37.0
+python-dotenv>=1.0.0

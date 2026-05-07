@@ -17,5 +17,48 @@
     "eod_exit_time": "15:30",
     "shares_per_trade": 100,
     "max_trades_per_day": 2
+  },
+
+  "mean_reversion": {
+    "bb_period": 20,
+    "bb_std": 2.0,
+    "rsi_period": 14,
+    "rsi_oversold": 30.0,
+    "rsi_overbought": 70.0,
+    "vol_multiplier": 1.5,
+    "vol_avg_window": 20,
+    "stop_loss_pct": 2.0,
+    "max_positions": 3,
+    "shares_per_trade": 100
+  },
+
+  "theta_decay": {
+    "target_delta": 0.30,
+    "target_dte": 35,
+    "min_dte": 25,
+    "max_dte": 50,
+    "close_profit_pct": 0.50,
+    "close_dte": 21,
+    "risk_free_rate": 0.05,
+    "vol_window": 20,
+    "contracts": 1,
+    "max_positions": 4
+  },
+
+  "momentum": {
+    "universe": [
+      "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "BRK-B",
+      "JPM",  "V",    "UNH",   "XOM",  "LLY",  "JNJ",  "PG",   "MA",
+      "HD",   "MRK",  "ABBV",  "CVX",  "AVGO", "PEP",  "COST", "KO",
+      "WMT",  "TMO",  "MCD",   "CSCO", "ACN",  "BAC"
+    ],
+    "market_symbol": "SPY",
+    "weight_momentum": 0.60,
+    "weight_beta": 0.25,
+    "weight_rs": 0.15,
+    "top_n": 20,
+    "stop_loss_pct": 15.0,
+    "lookback_months": 13,
+    "min_history_months": 13
   }
 }

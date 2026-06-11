@@ -12,6 +12,7 @@ import numpy as np
 
 from data.fetcher import fetch_daily, fetch_intraday, get_previous_day_open, split_by_day
 from strategies.bounce_back import BounceBackStrategy, BounceBackConfig, Trade
+from strategies.rsi_strategy import RSIStrategy, RSIConfig, RSITrade
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -20,15 +21,16 @@ from strategies.bounce_back import BounceBackStrategy, BounceBackConfig, Trade
 
 class Backtester:
     """
-    Walk-forward backtester that runs a BounceBackStrategy day-by-day.
+    Walk-forward backtester that runs a strategy day-by-day.
 
     Parameters
     ----------
     ticker          : Stock symbol (e.g. 'SPY', 'AAPL').
     interval        : Intraday bar interval ('1m', '5m', '15m').
     lookback_days   : Calendar days of intraday history to fetch (≤ 59 for yfinance).
-    config          : BounceBackConfig instance; uses defaults if None.
+    config          : BounceBackConfig or RSIConfig; uses defaults if None.
     initial_capital : Starting cash for equity curve calculation.
+    strategy_name   : 'bounce_back' or 'rsi' (default 'rsi').
     """
 
     def __init__(
@@ -36,15 +38,22 @@ class Backtester:
         ticker: str,
         interval: str = "5m",
         lookback_days: int = 59,
-        config: BounceBackConfig | None = None,
+        config: BounceBackConfig | RSIConfig | None = None,
         initial_capital: float = 100_000.0,
+        strategy_name: str = "rsi",
     ) -> None:
         self.ticker          = ticker.upper()
         self.interval        = interval
         self.lookback_days   = lookback_days
-        self.config          = config or BounceBackConfig()
         self.initial_capital = initial_capital
-        self.strategy        = BounceBackStrategy(self.config)
+        self.strategy_name   = strategy_name
+
+        if strategy_name == "rsi":
+            self.config   = config or RSIConfig()
+            self.strategy = RSIStrategy(self.config)
+        else:
+            self.config   = config or BounceBackConfig()
+            self.strategy = BounceBackStrategy(self.config)
 
         self._daily_df    : pd.DataFrame | None = None
         self._intraday_df : pd.DataFrame | None = None
@@ -77,16 +86,21 @@ class Backtester:
         day_map = split_by_day(self._intraday_df)
         all_trades: list[Trade] = []
         skipped = 0
+        carry_trade = None  # RSI: open position carried over between days
 
         for date_str, day_bars in sorted(day_map.items()):
             day_ts = pd.Timestamp(date_str)
-            try:
-                start_line = get_previous_day_open(self._daily_df, day_ts)
-            except ValueError:
-                skipped += 1
-                continue
 
-            trades = self.strategy.run_day(day_bars, start_line)
+            if self.strategy_name == "rsi":
+                trades, carry_trade = self.strategy.run_day(day_bars, open_trade=carry_trade)
+            else:
+                try:
+                    start_line = get_previous_day_open(self._daily_df, day_ts)
+                except ValueError:
+                    skipped += 1
+                    continue
+                trades = self.strategy.run_day(day_bars, start_line)
+
             all_trades.extend(trades)
 
         self._trades = all_trades
@@ -160,8 +174,9 @@ class Backtester:
             print(s["error"])
             return
 
+        label = "RSI Mean-Reversion" if self.strategy_name == "rsi" else "Bounce Back"
         print("\n" + "=" * 55)
-        print(f"  Bounce Back Strategy — Backtest Results [{s['ticker']}]")
+        print(f"  {label} Strategy — Backtest Results [{s['ticker']}]")
         print("=" * 55)
         print(f"  Interval          : {s['interval']}")
         print(f"  Total Trades      : {s['total_trades']}")
